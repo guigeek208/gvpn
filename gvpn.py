@@ -277,7 +277,7 @@ class gVPN:
         fh.close()
     
     def event_connect(self, widget, data):
-        print "event connect2"
+        print "event connect"
         for i in range(len(self.list_VPN)):
             if ( self.list_VPN[i].addr ==  data): 
                 if (self.list_VPN[i].connect() == 1):
@@ -681,13 +681,20 @@ class gVPN:
         self.item_disconnected.set_sensitive(False);
         self.item_disconnected.show()
         self.menu_status.append(self.item_disconnected )
+        
+        self.item_menu_vpn = gtk.MenuItem("VPNs"); 
+        self.menu_vpn = gtk.Menu()
+        
         # Load VPN
         for i in range(len(self.list_VPN)):
             self.item = gtk.MenuItem(self.list_VPN[i].name);
             self.item.connect("activate", self.event_connect, self.list_VPN[i].addr);
             self.item.show();
-            self.menu_status.append(self.item)
+            self.menu_vpn.append(self.item)
         #self.load_VPNSSL();
+        self.item_menu_vpn.set_submenu(self.menu_vpn);
+        self.menu_status.append(self.item_menu_vpn);
+        
         image = gtk.ImageMenuItem(gtk.STOCK_QUIT)
         image.connect("activate", self.destroy)
         image.show()
