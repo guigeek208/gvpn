@@ -11,12 +11,36 @@ import glob
 import string
 import pwd
 import time
+from time import strftime, localtime
 import threading
 import thread
+from datetime import date
+
+class VPNSSL:
+    def __init__(self, path_global, path, config, name, addr, login, pwd, debugfile):
+        self.path_global = path_global
+        self.path = path
+        self.config = config
+        self.name = name;
+        self.addr = addr;
+        self.login = login;
+        self.pwd = pwd;
+        self.debugfile = debugfile;
+        self.CONNECTED = 0;
+        
+    def connect(self):
+        self.print_debug("Connexion SSL\n")
+        cmd=self.path_global+"openvpn.expect "+self.path+" "+self.config+" "+self.login+" "+self.pwd
+        print cmd
+        os.system(cmd)
+        
+    def print_debug(self, string):
+        with open(self.debugfile,'a') as wr:
+            wr.write(string);        
 
 # Conf /etc/vpnc/gvpnc.conf
 class VPN:
-    def __init__(self, name, addr, vpntype, groupname, grouppwd, login, pwd, list_lan, addrtocheck):
+    def __init__(self, name, addr, vpntype, groupname, grouppwd, login, pwd, list_lan, addrtocheck,debugfile):
         self.name = name;
         self.addr = addr;
         self.vpntype = vpntype;
@@ -26,6 +50,7 @@ class VPN:
         self.pwd = pwd;
         self.list_lan = list_lan;
         self.addrtocheck = addrtocheck;
+        self.debugfile = debugfile;
         #self.print_vpn();
         self.create_peer();
         self.CONNECTED = 0;
@@ -114,9 +139,9 @@ class VPN:
             fh.write('#refuse-chap\n');
             fh.write('# use mschap\n');
             fh.write('refuse-mschap\n');
-            #fh.write('require-mschap-v2\n');        
+            #fh.write('require-mschap-v2\n');
             fh.close();
-            
+
             file_r = open('/etc/ppp/chap-secrets', 'r')
             newlines = []
             match = 0;
@@ -132,7 +157,7 @@ class VPN:
 
             file_w = open('/etc/ppp/chap-secrets', 'w')
             file_w.writelines(newlines)
-            
+
         else:
             fh = open('/etc/vpnc/'+self.name+'.conf', 'w');
             fh.write('IPSec gateway '+self.addr+'\n');
@@ -149,7 +174,7 @@ class VPN:
 
     def connect(self):
         self.timeout = 10;
-        print "Connexion a "+self.name;
+        self.print_debug("Connexion a "+self.name+"\n");
         if (self.vpntype == "PPTP"):
             cmd = '/usr/sbin/pppd call gvpnc.'+self.name;
         else:
@@ -157,14 +182,14 @@ class VPN:
         os.system(cmd);
         timeout = 0;
         while ((self.check_connection_dev() != 1) and (timeout!=self.timeout)):
-            print timeout;
+            #print timeout;
             time.sleep(1);
             timeout = timeout + 1;
         if (timeout == 3):
             return 0;
         timeout = 0;
         while ((self.check_connection() != 1) and (timeout!=self.timeout)):
-            print timeout;
+            self.print_debug(str(timeout)+"\n");
             time.sleep(1);
             timeout = timeout + 1;
         if (timeout == self.timeout):
@@ -172,18 +197,18 @@ class VPN:
         if (self.vpntype == "PPTP"):
             self.create_routes();
         self.CONNECTED = 1;
-        print "Connexion OK";
+        self.print_debug("Connexion OK\n");
         self.child_pid = os.fork()
         if self.child_pid == 0:
             res = self.pingTestDevice();
             if (res == -1):
-                print "Reconnexion";
+                self.print_debug("Reconnexion ...\n");
                 self.connect();
                 exit(0);
         return 1;
 
     def disconnect(self):
-        print "Deconnexion de "+self.name;
+        self.print_debug("Deconnexion de "+self.name+"\n");
         if (self.vpntype == "PPTP"):
             cmd = 'poff gvpnc.'+self.name;
         else:
@@ -191,13 +216,14 @@ class VPN:
         os.system(cmd);
         self.CONNECTED = 0;
         cmd = "kill "+str(self.child_pid);
-        print "PID : "+cmd;
+        self.print_debug("PID "+cmd+"\n");
+        #self.debugfile.write( "PID : "+cmd+"\n");
         os.system(cmd);
 
     def check_connection_dev(self):
         path = "/sys/class/net";
         tab = os.listdir(path);
-        if (self.vpntype == "PPTP"):    
+        if (self.vpntype == "PPTP"):
             for file in tab:
                 if (re.match(r"ppp(\d)", file)):
                     self.device = file;
@@ -206,17 +232,17 @@ class VPN:
             for file in tab:
                 if (re.match(r"tun(\d)", file)):
                     self.device = file;
-                    return 1;            
-        return 0;     
+                    return 1;
+        return 0;
 
     def check_connection(self):
         path = "/tmp/check_vpn.sh";
         fh = open(path,'w');
         fh.write('ifconfig | grep '+self.device+'\n');
         fh.write('echo $? > /tmp/status_vpn.log\n');
-        fh.close();    
+        fh.close();
         os.system("sh "+path);
-        fh = open('/tmp/status_vpn.log');    
+        fh = open('/tmp/status_vpn.log');
         status = string.atoi(fh.read());
         fh.close();
         if (status != 0):
@@ -228,12 +254,18 @@ class VPN:
         if (self.vpntype == "PPTP"):
             for i in range(len(self.list_lan)):
                 cmd = 'route add -net '+self.list_lan[i]+' dev '+self.device;
-                print "lan "+self.list_lan[i]+" "+cmd;
+                self.print_debug("lan "+self.list_lan[i]+" : "+cmd+"\n");
+                #print "lan "+self.list_lan[i]+" "+cmd;
                 os.system(cmd);
+
+    def print_debug(self, string):
+        with open(self.debugfile,'a') as wr:
+            wr.write(string);
 
 class gVPN:
     def load_settings(self):
-        fh = open('/etc/vpnc/gvpnc.conf', 'r')
+        self.PATH_CONF = "/etc/vpnc/"
+        fh = open(self.PATH_CONF+'gvpnc.conf', 'r')
         f=fh.readlines();
         #ligne = f.split('\n')
         i=0;
@@ -269,17 +301,104 @@ class gVPN:
             for j in range(len(inflan)):
                 list_lan.append(inflan[j]);
             #print "infos :"+name+" "+addr+" "+vpntype+" "+groupname+" "+grouppwd+" "+login+" "+pwd;
-            vpn = VPN(name, addr, vpntype, groupname, grouppwd, login, pwd, list_lan, addrtocheck)
+            vpn = VPN(name, addr, vpntype, groupname, grouppwd, login, pwd, list_lan, addrtocheck, self.debugfile)
             self.list_VPN.append(vpn);
             i = i+1;
             if (len(f) <= nbparam*i):
                 break;
         fh.close()
-    
+        #
+        # Load SSL Conf
+        fh = open(self.PATH_CONF+'ssl.conf', 'r+')
+        fhl=fh.readlines()
+        for root, dirs, files in os.walk(self.PATH_CONF):
+            for dir in dirs:
+                #print dir
+                for root, dirs, files in os.walk(self.PATH_CONF+dir):
+                    for file in files:
+                        if file.endswith('.ovpn'):
+                            #print file
+                            f = open(self.PATH_CONF+dir+'/'+file, 'r')
+                            for line in f:
+                                m = re.match("remote\s+(\S*)", line)
+                                if m:
+                                    addr=m.group(1)
+                                m = re.match("ca\s+(\S*)", line)
+                                if m:
+                                    #print m.group(1)
+                                    found=0
+                                    for fichier in files:
+                                        if (fichier == m.group(1)):
+                                            found=1
+                                    if (found == 0):
+                                        return
+                                #print "suite "+line
+                                m = re.match("cert\s+(\S*)", line)
+                                if m:
+                                    #print m.group(1)
+                                    found=0
+                                    for fichier in files:
+                                        if (fichier == m.group(1)):
+                                            found=1
+                                    if (found == 0):
+                                        return
+                                m = re.match("key\s+(\S*)", line)
+                                if m:
+                                    #print m.group(1)
+                                    found=0
+                                    for fichier in files:
+                                        if (fichier == m.group(1)):
+                                            found=1
+                                    if (found == 0):
+                                        return
+                            found=0
+                            newaddr=addr.replace(".","\.")
+                            #print newaddr
+                            for line in fhl:
+                                #print line+" "+newaddr
+                                m = re.match("^\["+newaddr+"\]", line)
+                                if m:
+                                    #print "trouve "+m.group(0)
+                                    found=1
+                            if (found == 0):
+                                #print "pas trouve "+addr
+                                fh.write("["+addr+"]\n")
+                                fh.write("path="+self.PATH_CONF+dir+'/\n')
+                                fh.write("config="+self.PATH_CONF+dir+'/'+file+'\n')
+                                fh.write("login=\n")
+                                fh.write("pwd=\n")       
+        i=0
+        nbparam = 5
+        #print fhl[0]
+        m = re.match(r"^\[(\S+)\]", fhl[i*nbparam])
+        while (m is not None):
+            name=m.group(1)
+            words = fhl[i*nbparam+1].split('\n');
+            inf = words[0].split('=',1);   
+            path = inf[1]
+            words = fhl[i*nbparam+2].split('\n');
+            inf = words[0].split('=',1);   
+            config = inf[1]
+            words = fhl[i*nbparam+3].split('\n');
+            inf = words[0].split('=',1);   
+            login = inf[1]
+            words = fhl[i*nbparam+4].split('\n');
+            inf = words[0].split('=',1);   
+            pwd = inf[1]
+            #print login+" "+pwd
+            vpnssl = VPNSSL(self.PATH_CONF, path, config, name, name, login, pwd, self.debugfile)
+            self.list_VPNSSL.append(vpnssl)
+            i = i+1
+            if (i*nbparam != len(fhl)):
+                m = re.match(r"^\[(\S+)\]", fhl[i*nbparam])
+            else:
+                m = None
+        fh.close()
+
     def event_connect(self, widget, data):
-        print "event connect"
+        self.print_debug("event connect\n");
         for i in range(len(self.list_VPN)):
-            if ( self.list_VPN[i].addr ==  data): 
+            if ( self.list_VPN[i].addr ==  data):
                 if (self.list_VPN[i].connect() == 1):
                     self.statusIcon.set_from_file("pixmaps/connected.png");
                     self.VPN_connected = self.list_VPN[i];
@@ -291,14 +410,18 @@ class gVPN:
                     md = gtk.MessageDialog(self.window, gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_ERROR, gtk.BUTTONS_CLOSE, "Erreur : impossible de se connecter")
                     md.run()
                     md.destroy()
-        self.statusIcon.set_from_file("pixmaps/connected.png");   
- 
+        # SSL 
+        for i in range(len(self.list_VPNSSL)):
+            if ( self.list_VPNSSL[i].addr ==  data):
+                self.list_VPNSSL[i].connect()           
+        #self.statusIcon.set_from_file("pixmaps/connected.png");
+
     def event_disconnect(self, widget, data=None):
-        print "event disconnect"   
+        self.print_debug("event disconnect");
         self.VPN_connected.disconnect();
         self.item_disconnected.set_sensitive(False);
         self.statusIcon.set_from_file("pixmaps/disconnected.png");
-        
+
 #    def connect_clicked(self, widget, data=None):
 #        for i in range(len(self.list_VPN)):
 #            if ( self.list_VPN[i].name ==  self.vpn_selected):
@@ -318,7 +441,7 @@ class gVPN:
 #                    md.run()
 #                    md.destroy()
             #self.list_VPN[i].addr, self.list_VPN[i].vpntype, "", True]);
-    
+
 #    def disconnect_clicked(self, widget, data=None):
 #        self.VPN_connected.disconnect();
 #        self.button_disconnect.set_sensitive(False);
@@ -327,7 +450,7 @@ class gVPN:
 #        self.statusIcon.set_from_file("pixmaps/disconnected.png");
 #        self.window.set_icon_from_file('pixmaps/disconnected.png');
 #        self.label_status.set_text("Deconnecte");
-    
+
     def on_menuitem_modify_activate(self, widget, data=None):
         for i in range(len(self.list_VPN)):
             if ( self.list_VPN[i].name ==  self.vpn_selected):
@@ -338,11 +461,11 @@ class gVPN:
         self.window.set_sensitive(False);
         #self.assistant = gtk.Window(gtk.WINDOW_TOPLEVEL);
         window.set_position(gtk.WIN_POS_CENTER);
-        #self.windowmod.set_resizable(False); 
+        #self.windowmod.set_resizable(False);
         window.set_default_size(420, 300);
-        window.connect("delete_event", self.delete_event_win_settings) 
+        window.connect("delete_event", self.delete_event_win_settings)
         notebook = gtk.Notebook()
-        
+
         # GENERAL
         fixed_gen = gtk.Fixed();
         label_Nom = gtk.Label("Nom de la connexion");
@@ -386,51 +509,51 @@ class gVPN:
         fixed_gen.put(self.entry_Mdp_Mod, 240 , 155);
         fixed_gen.put(self.entry_Net_Mod, 240 , 185);
         fixed_gen.put(self.entry_Addrtocheck_Mod, 240 , 215);
-        
+
         fixed_gen.put(label_Nom, 20 , 5+5);
         fixed_gen.put(label_Addr, 20 , 35+5);
         fixed_gen.put(label_GrpName, 20 , 65+5);
         fixed_gen.put(label_GrpPwd, 20 , 95+5);
         fixed_gen.put(label_Login, 20 , 125+5);
         fixed_gen.put(label_Mdp, 20 , 155+5);
-        fixed_gen.put(label_Net, 20, 185+5);       
+        fixed_gen.put(label_Net, 20, 185+5);
         fixed_gen.put(label_Addrtocheck, 20, 215+5);
-        
+
         # ADVANCED
         fixed_adv = gtk.Fixed();
-               
+
         label = gtk.Label("General");
         notebook.append_page(fixed_gen, label)
         label = gtk.Label("Avance");
-        #notebook.append_page(fixed_adv, label)       
+        #notebook.append_page(fixed_adv, label)
         fixed = gtk.Fixed();
         fixed.put(notebook,0,0);
         butt_save = gtk.Button(stock=gtk.STOCK_SAVE)
         butt_cancel = gtk.Button(stock=gtk.STOCK_CANCEL)
-        butt_cancel.connect("clicked", self.delete_event_win_settings, "Cancel") 
+        butt_cancel.connect("clicked", self.delete_event_win_settings, "Cancel")
         fixed.put(butt_save, 110, 275);
         fixed.put(butt_cancel, 220, 275);
         window.add(fixed)
         window.show_all();
-    
+
     def on_menuitem_delete_activate(self, widget, data=None):
         print "menu delete"
         #(model, iter) = self.treeselection.get_selected()
         #self.liststore.remove(iter)
         #fh = open('./clickndial_directory.txt', 'w')
-        #iter = model.get_iter_root()   
+        #iter = model.get_iter_root()
         #iter = model.iter_next(iter_root)
         #while (iter != None):
         #    fh.write(model.get_value(iter,0)+'|'+
         #             model.get_value(iter,1)+'\n')
         #    iter = model.iter_next(iter)
         #fh.close()
-        
+
     def delete_event_win_settings(self, widget, event, data=None):
         self.window.set_sensitive(True);
-        widget.hide();    
+        widget.hide();
         #self.assistant.hide();
-        return False 
+        return False
 
     def callback_radioButton(self, widget, data=None):
         #print "%s was toggled %s" % (data, ("OFF", "ON")[widget.get_active()])
@@ -439,7 +562,7 @@ class gVPN:
             self.PPTP = 0;
             self.assistant.set_page_title(self.assisVPNfixed, "Configuration de la connexion VPNC");
             self.entry_GrpName.set_sensitive(True);
-            self.entry_GrpPwd.set_sensitive(True);            
+            self.entry_GrpPwd.set_sensitive(True);
         if ( data == "PPTP" and widget.get_active() ):
             self.PPTP = 1;
             self.VPNC = 0;
@@ -451,33 +574,33 @@ class gVPN:
         print "apply "+self.entry_Net.get_text();
         #self.entry_Nom  self.entry_Addr self.entry_GrpName  self.entry_Login self.entry_Mdp
         if ( self.PPTP == 1 ):
-           print "PPTP";           
-           vpn = VPN(self.label_Verif_Nom.get_text(), 
-                     self.label_Verif_Addr.get_text(), 
-                     "PPTP", 
+           print "PPTP";
+           vpn = VPN(self.label_Verif_Nom.get_text(),
+                     self.label_Verif_Addr.get_text(),
+                     "PPTP",
                      "",
                      "",
-                     self.label_Verif_Login.get_text(), 
-                     self.label_Verif_Mdp.get_text(), 
+                     self.label_Verif_Login.get_text(),
+                     self.label_Verif_Mdp.get_text(),
                      self.list_lan);
            self.list_VPN.append(vpn);
         if ( self.VPNC == 1 ):
            print "VPNC";
-           vpn = VPN(self.label_Verif_Nom.get_text(), 
-                     self.label_Verif_Addr.get_text(), 
-                     "VPNC", 
+           vpn = VPN(self.label_Verif_Nom.get_text(),
+                     self.label_Verif_Addr.get_text(),
+                     "VPNC",
                      self.label_Verif_GrpName.get_text(),
                      self.label_Verif_GrpPwd.get_text(),
-                     self.label_Verif_Login.get_text(), 
-                     self.label_Verif_Mdp.get_text(), 
+                     self.label_Verif_Login.get_text(),
+                     self.label_Verif_Mdp.get_text(),
                      self.list_lan);
            self.list_VPN.append(vpn);
-        
+
         self.delete_event_win_settings(self.assistant, "Cancel");
         size = len(self.list_VPN)-1;
         self.liststore.append([self.list_VPN[size].name, self.list_VPN[size].addr, self.list_VPN[size].vpntype, True]);
-           
-           
+
+
 
     def callback_assistant_confirm(self, widget, page, data=None):
         print "test to confirm ";
@@ -491,8 +614,8 @@ class gVPN:
             self.label_Verif_Login.set_text(self.entry_Login.get_text());
             self.label_Verif_Mdp.set_text(self.entry_Mdp.get_text());
             #self.label_Verif_Net.set_text("Reseaux Distants");
-           
-            
+
+
             tab = re.split('\s+', self.entry_Net.get_text());
             #m = re.match(r"(([0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)/24)(\s(([0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)/24))*", self.entry_Net.get_text());
             for i in range(len(tab)):
@@ -511,35 +634,34 @@ class gVPN:
 
     def on_menuitem_create_assistant(self, widget, data=None):
         self.assistant = gtk.Assistant ();
-        self.window.set_sensitive(False);
+        #self.window.set_sensitive(False);
         #self.assistant = gtk.Window(gtk.WINDOW_TOPLEVEL);
         self.assistant.set_position(gtk.WIN_POS_CENTER);
-        self.assistant.set_resizable(False); 
+        self.assistant.set_resizable(False);
         self.assistant.set_default_size(400, 300);
-        self.assistant.connect("delete_event", self.delete_event_win_settings) 
+        self.assistant.connect("delete_event", self.delete_event_win_settings)
         self.assistant.connect("cancel", self.delete_event_win_settings, "Cancel")
-        
+
         # Page 1
         self.assisP1fixed = gtk.Fixed();
         self.radioButton_pptp = gtk.RadioButton(group=None, label="PPTP");
-        self.radioButton_vpnc = gtk.RadioButton(group=self.radioButton_pptp, label="VPN-Cisco"); 
+        self.radioButton_vpnc = gtk.RadioButton(group=self.radioButton_pptp, label="VPN-Cisco");
         self.radioButton_pptp.connect("toggled", self.callback_radioButton, "PPTP")
         self.radioButton_vpnc.connect("toggled", self.callback_radioButton, "VPNC")
-        
+
         self.assisP1fixed.put(self.radioButton_pptp, 10, 40);
         self.assisP1fixed.put(self.radioButton_vpnc, 10, 120);
         self.assistant.append_page(self.assisP1fixed);
-        self.assistant.set_page_title(self.assisP1fixed, "Creation de la connexion");      
+        self.assistant.set_page_title(self.assisP1fixed, "Creation de la connexion");
         self.assistant.set_page_type(self.assisP1fixed, gtk.ASSISTANT_PAGE_INTRO);
         self.assistant.set_page_complete(self.assisP1fixed, True);
-        
+
         # Page 2
-        #VPN
         self.assisVPNfixed = gtk.Fixed();
         self.assistant.append_page(self.assisVPNfixed);
         self.assistant.set_page_title(self.assisVPNfixed, "Configuration de la connexion PPTP");
         self.assistant.set_page_type(self.assisVPNfixed, gtk.ASSISTANT_PAGE_CONTENT);
-        self.assistant.set_page_complete(self.assisVPNfixed, True);    
+        self.assistant.set_page_complete(self.assisVPNfixed, True);
         self.label_Nom = gtk.Label("Nom de la connexion");
         self.entry_Nom = gtk.Entry(max=15);
         self.label_Addr = gtk.Label("Adresse IP");
@@ -566,7 +688,7 @@ class gVPN:
         self.assisVPNfixed.put(self.entry_Login, 240 , 125);
         self.assisVPNfixed.put(self.entry_Mdp, 240 , 155);
         self.assisVPNfixed.put(self.entry_Net, 240 , 185);
-        
+
         self.assisVPNfixed.put(self.label_Nom, 20 , 5+5);
         self.assisVPNfixed.put(self.label_Addr, 20 , 35+5);
         self.assisVPNfixed.put(self.label_GrpName, 20 , 65+5);
@@ -574,9 +696,9 @@ class gVPN:
         self.assisVPNfixed.put(self.label_Login, 20 , 125+5);
         self.assisVPNfixed.put(self.label_Mdp, 20 , 155+5);
         self.assisVPNfixed.put(self.label_Net, 20, 185+5);
-        
+
         self.assistant.connect("prepare", self.callback_assistant_confirm, self.assisVPNfixed);
-        
+
         # Page 3
         # SUMMARY
         self.assisSUMVPNfixed = gtk.Fixed();
@@ -584,7 +706,7 @@ class gVPN:
         self.assistant.set_page_title(self.assisSUMVPNfixed, "Confirmation du VPN");
         self.assistant.set_page_type(self.assisSUMVPNfixed, gtk.ASSISTANT_PAGE_CONFIRM);
         self.assistant.set_page_complete(self.assisSUMVPNfixed, True);
-        
+
         self.label_Verif_Nom = gtk.Label("Nom de la connexion");
         self.label_Verif_Addr = gtk.Label("Adresse IP");
         self.label_Verif_GrpName = gtk.Label("Nom du Groupe");
@@ -592,7 +714,7 @@ class gVPN:
         self.label_Verif_Login = gtk.Label("Login");
         self.label_Verif_Mdp = gtk.Label("Mot de passe");
         self.label_Verif_Net = gtk.Label("Reseaux Distants");
-        
+
         self.assisSUMVPNfixed.put(self.label_Verif_Nom, 80 , 5+5);
         self.assisSUMVPNfixed.put(self.label_Verif_Addr, 80 , 35+5);
         self.assisSUMVPNfixed.put(self.label_Verif_GrpName, 80 , 65+5);
@@ -600,9 +722,9 @@ class gVPN:
         self.assisSUMVPNfixed.put(self.label_Verif_Login, 80 , 125+5);
         self.assisSUMVPNfixed.put(self.label_Verif_Mdp, 80 , 155+5);
         self.assisSUMVPNfixed.put(self.label_Verif_Net, 80, 185+5);
-                
+
         self.assistant.connect("apply", self.assistant_apply);
-        
+
         self.assistant.show_all();
 
     def treeview_listvpn_clicked_event(self, widget, event):
@@ -617,7 +739,7 @@ class gVPN:
         (model, iter) = self.treeselection.get_selected()
         if (iter != None):
             self.vpn_selected = model.get_value(iter, 0)
-            
+
 
     def delete_event(self, widget, event, data=None):
         return False
@@ -636,25 +758,78 @@ class gVPN:
         else:
             data.show()
 
-    def load_VPNSSL(self):
-        for root, dirs, files in os.walk("/etc/vpnc"):
-            for dir in dirs:
-                #print dir
-                for root, dirs, files in os.walk("/etc/vpnc/"+dir):
-                    for file in files:
-                        if file.endswith('.ovpn'):
-                            item = gtk.MenuItem(file)
-                            item.connect("activate", self.event_connect, "/etc/vpnc/"+dir+"/"+file);
-                            item.show();
-                            self.menu_status.append(item);
+    def print_debug(self, string):
+        with open(self.debugfile,'a') as wr:
+            wr.write(string);
+
+    def refresh_debug(self, widget, data=None):
+        print "refresh";
+        text = gtk.TextBuffer()
+        enditer = text.get_end_iter()
+        f = open(self.debugfile, 'r')
+        for line in f:
+            print line;
+            text.insert(enditer, line)
+        self.textbox.set_buffer(text)
+
+    def destroy_debug(self, widget, data=None):
+        self.window.destroy()
+
+    def display_debug(self, widget, data=None):
+        print "debug";
+        self.window = gtk.Window(gtk.WIN_POS_CENTER)
+        self.window.connect("delete_event", self.delete_event)
+        self.window.set_position(gtk.WIN_POS_CENTER)
+        self.window.set_default_size(600, 500)
+        self.window.set_resizable(True);
+        self.window.set_title("gVPN")
+        self.window.connect("destroy", self.destroy)
+        self.window.set_border_width(0)
+
+        vbox = gtk.VBox(False, 1)
+        hbox = gtk.HBox(True, 1)
+        refreshButt = gtk.Button("Rafraichir")
+        refreshButt.set_size_request(70, 30)
+        refreshButt.connect("clicked", self.refresh_debug);
+        close = gtk.Button("Fermer")
+        close.connect("clicked", self.destroy_debug);
+        hbox.add(refreshButt)
+        hbox.add(close)
+        vbox.pack_start(hbox, False, False, 0)
+        #vbox.add(hbox)
+
+        scrollWindowText = gtk.ScrolledWindow()
+        scrollWindowText.set_policy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
+        self.textbox = gtk.TextView()
+        self.textbox.set_editable(False)
+        text = gtk.TextBuffer()
+        enditer = text.get_end_iter()
+        f = open(self.debugfile, 'r')
+        for line in f:
+            print line;
+            text.insert(enditer, line)
+
+        self.textbox.set_buffer(text)
+        scrollWindowText.add(self.textbox)
+        #vbox.pack_end(scrollWindowText, True, True, 0)
+        vbox.add(scrollWindowText);
+        self.window.add(vbox)
+
+        self.window.show_all();
+
 
     # Init classe
     def __init__(self):
         self.VPNC = 0;
         self.PPTP = 1;
         self.list_VPN = []
-        
-        self.load_settings();       
+        self.list_VPNSSL = []
+        today = str(date.today());
+        self.debugfile="logs/"+today+".log";
+        #self.debugfile = open("logs/"+today+".log", 'w');
+        time=strftime("%H:%M:%S", localtime());
+        self.print_debug("-------------------------------------------------- "+time+"-------------------------------------------------- \n");
+        self.load_settings();
 
         # Test superuser
         cmd = '/usr/bin/whoami > /tmp/gvpn_user';
@@ -668,37 +843,52 @@ class gVPN:
             md = gtk.MessageDialog(self.window, gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_ERROR, gtk.BUTTONS_CLOSE, "Erreur : l'application doit etre lance avec les privileges adminstrateurs")
             md.run()
             md.destroy()
-            gtk.main_quit();  
-       
+            gtk.main_quit();
+
         # StatusIcon
         self.statusIcon = gtk.status_icon_new_from_file("pixmaps/disconnected.png")
         self.statusIcon.connect("popup-menu", self.popup_menu_status)
         self.menu_status = gtk.Menu()
-       
+
         # create items for the menu - labels, checkboxes, radio buttons and images are supported:
         self.item_disconnected = gtk.MenuItem("Deconnecter")
         self.item_disconnected.connect("activate", self.event_disconnect);
         self.item_disconnected.set_sensitive(False);
         self.item_disconnected.show()
         self.menu_status.append(self.item_disconnected )
-        
-        self.item_menu_vpn = gtk.MenuItem("VPNs"); 
+
+        self.item_add = gtk.MenuItem("Ajouter")
+        self.item_add.connect("activate", self.on_menuitem_create_assistant);
+        self.item_add.show()
+        self.menu_status.append(self.item_add )
+
+        self.item_menu_vpn = gtk.MenuItem("VPNs");
         self.menu_vpn = gtk.Menu()
-        
+
         # Load VPN
         for i in range(len(self.list_VPN)):
             self.item = gtk.MenuItem(self.list_VPN[i].name);
             self.item.connect("activate", self.event_connect, self.list_VPN[i].addr);
             self.item.show();
             self.menu_vpn.append(self.item)
-        #self.load_VPNSSL();
+        # Load VPN SSL
+        for i in range(len(self.list_VPNSSL)):
+            item = gtk.MenuItem(self.list_VPNSSL[i].name)
+            item.connect("activate", self.event_connect, self.list_VPNSSL[i].addr);
+            item.show();
+            self.menu_vpn.append(item);    
         self.item_menu_vpn.set_submenu(self.menu_vpn);
         self.menu_status.append(self.item_menu_vpn);
-        
+
+        self.item_logs = gtk.MenuItem("Logs");
+        self.item_logs.connect("activate", self.display_debug);
+        self.item_logs.show()
+        self.menu_status.append(self.item_logs);
+
         image = gtk.ImageMenuItem(gtk.STOCK_QUIT)
         image.connect("activate", self.destroy)
         image.show()
-        self.menu_status.append(image)                   
+        self.menu_status.append(image)
         self.menu_status.show()
         #self.appind.set_menu(self.menu)
 
@@ -710,4 +900,4 @@ class gVPN:
 if __name__ == "__main__":
     gVPN = gVPN()
     gVPN.main()
-    
+
